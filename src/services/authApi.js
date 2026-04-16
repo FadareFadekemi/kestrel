@@ -5,6 +5,7 @@
  */
 
 const TOKEN_KEY = "kestrel_token";
+const BASE = import.meta.env.VITE_API_URL || '';
 
 export const getToken  = ()      => sessionStorage.getItem(TOKEN_KEY);
 export const setToken  = (t)     => sessionStorage.setItem(TOKEN_KEY, t);
@@ -28,13 +29,13 @@ async function post(path, body) {
 }
 
 export async function signup(email, password, name = "") {
-  const data = await post("/api/auth/signup", { email, password, name });
+  const data = await post(`${BASE}/api/auth/signup`, { email, password, name });
   setToken(data.token);
   return data.user;
 }
 
 export async function login(email, password) {
-  const data = await post("/api/auth/login", { email, password });
+  const data = await post(`${BASE}/api/auth/login`, { email, password });
   setToken(data.token);
   return data.user;
 }
@@ -44,14 +45,14 @@ export function logout() {
 }
 
 export async function fetchMe() {
-  const res = await fetch("/api/auth/me", { headers: authHeaders() });
+  const res = await fetch(`${BASE}/api/auth/me`, { headers: authHeaders() });
   if (!res.ok) { clearToken(); return null; }
   return res.json();
 }
 
 // Authenticated fetch wrapper — used by leadsApi
 export async function authFetch(path, options = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",

@@ -1,8 +1,10 @@
 import { getToken, clearToken } from './authApi';
 
+const BASE = import.meta.env.VITE_API_URL || '';
+
 async function post(path, body) {
   const token = getToken();
-  const res = await fetch(path, {
+  const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -18,7 +20,7 @@ async function post(path, body) {
 
 async function streamPost(path, body, onChunk) {
   const token = getToken();
-  const res = await fetch(path, {
+  const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

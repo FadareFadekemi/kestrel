@@ -4,6 +4,7 @@ import { TrendingUp, Mail, Users, Zap, ArrowUpRight } from 'lucide-react';
 import StatusBadge from '../components/UI/StatusBadge';
 import ScoreRing from '../components/UI/ScoreRing';
 import EmptyState from '../components/UI/EmptyState';
+import useIsMobile from '../hooks/useIsMobile';
 
 // Build activity data from saved leads or use seeded data when none exist
 function buildActivityData(leads) {
@@ -44,6 +45,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export default function Dashboard({ leads, setActivePage }) {
+  const isMobile = useIsMobile();
   const stats = useMemo(() => {
     const total    = leads.length;
     const sent     = leads.reduce((a, l) => a + (l.emails?.length || 0), 0);
@@ -71,14 +73,14 @@ export default function Dashboard({ leads, setActivePage }) {
   const recentLeads = [...leads].sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded)).slice(0, 5);
 
   return (
-    <div style={{ padding: '28px 32px', overflowY: 'auto', height: '100%' }}>
+    <div style={{ padding: isMobile ? '20px 16px' : '28px 32px', overflowY: 'auto', height: '100%' }}>
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#fafafa', margin: 0 }}>Dashboard</h1>
         <p style={{ fontSize: 13, color: '#52525b', marginTop: 4 }}>Your outreach overview</p>
       </div>
 
       {/* Stat cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 10 : 16, marginBottom: 28 }}>
         <StatCard icon={<Users size={16} color="#f59e0b" />} label="Total Leads"   value={stats.total}    delta="+12%" />
         <StatCard icon={<Mail  size={16} color="#60a5fa" />} label="Emails Sent"   value={stats.sent}     delta="+8%" />
         <StatCard icon={<TrendingUp size={16} color="#34d399" />} label="Reply Rate"  value={`${stats.replyRate}%`} delta="+2.1%" />
@@ -86,7 +88,7 @@ export default function Dashboard({ leads, setActivePage }) {
       </div>
 
       {/* Charts row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 28 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: 16, marginBottom: 28 }}>
         {/* Activity chart */}
         <div style={{ background: '#18181b', border: '1px solid #27272a', borderRadius: 12, padding: '20px 20px 16px' }}>
           <p style={{ fontSize: 13, fontWeight: 600, color: '#f4f4f5', margin: '0 0 20px' }}>Outreach Activity, Last 30 Days</p>
@@ -151,6 +153,27 @@ export default function Dashboard({ leads, setActivePage }) {
             description="Research your first company to get started."
             action={{ label: 'Research a Lead', onClick: () => setActivePage('Agent') }}
           />
+        ) : isMobile ? (
+          <div>
+            {recentLeads.map((lead, i) => (
+              <div key={lead.id} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 16px',
+                borderBottom: i < recentLeads.length - 1 ? '1px solid #1c1c1e' : 'none',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <ScoreRing score={lead.score} size={32} />
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 500, color: '#f4f4f5', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.company}</p>
+                    <StatusBadge status={lead.status} />
+                  </div>
+                </div>
+                <button onClick={() => setActivePage('Leads')} style={{ fontSize: 11, color: '#f59e0b', background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0 }}>
+                  View →
+                </button>
+              </div>
+            ))}
+          </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>

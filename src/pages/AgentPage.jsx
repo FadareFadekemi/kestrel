@@ -10,12 +10,14 @@ import FollowUpSequence from '../components/Email/FollowUpSequence';
 import { researchLead, profileLead, writeEmail, generateSequence, generateABVariants, sendEmail } from '../services/api';
 import { runTrackerAgent } from '../services/tracker';
 import { AlertCircle } from 'lucide-react';
+import useIsMobile from '../hooks/useIsMobile';
 
 const TABS = ['Research', 'Profile', 'Email', 'A/B Variants', 'Sequence'];
 
 const IDLE_STATES = { research: 'idle', profiling: 'idle', email: 'idle', tracker: 'idle' };
 
 export default function AgentPage({ onLeadSaved, user, onGoToSettings }) {
+  const isMobile = useIsMobile();
   const [agentStates, setAgentStates]   = useState(IDLE_STATES);
   const [agentStatus,  setAgentStatus]  = useState({});  // per-agent status text
   const [streamText,   setStreamText]   = useState({});  // per-agent streaming text
@@ -162,11 +164,11 @@ export default function AgentPage({ onLeadSaved, user, onGoToSettings }) {
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
-      {/* Left sidebar */}
-      <AgentSidebar agentStates={agentStates} />
+      {/* Left sidebar — hidden on mobile */}
+      {!isMobile && <AgentSidebar agentStates={agentStates} />}
 
       {/* Center panel */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         {/* Incomplete profile banner */}
         {profileIncomplete && (
           <div style={{
@@ -188,7 +190,7 @@ export default function AgentPage({ onLeadSaved, user, onGoToSettings }) {
         )}
 
         {/* Input + error */}
-        <div style={{ padding: '20px 20px 0', flexShrink: 0 }}>
+        <div style={{ padding: isMobile ? '12px 12px 0' : '20px 20px 0', flexShrink: 0 }}>
           <AgentInputForm onSubmit={runPipeline} isRunning={isRunning} />
           {error && (
             <div style={{ marginBottom: 12, padding: '10px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8 }}>
@@ -198,7 +200,7 @@ export default function AgentPage({ onLeadSaved, user, onGoToSettings }) {
         </div>
 
         {/* Output tabs */}
-        <div style={{ borderBottom: '1px solid #27272a', paddingLeft: 20, flexShrink: 0, display: 'flex', gap: 2 }}>
+        <div style={{ borderBottom: '1px solid #27272a', paddingLeft: isMobile ? 8 : 20, flexShrink: 0, display: 'flex', gap: 2, overflowX: 'auto' }}>
           {TABS.map(tab => {
             const hasContent = (
               (tab === 'Research'    && (research || agentStates.research === 'running')) ||
@@ -216,7 +218,8 @@ export default function AgentPage({ onLeadSaved, user, onGoToSettings }) {
                   color: activeTab === tab ? '#f4f4f5' : hasContent ? '#71717a' : '#3f3f46',
                   borderBottom: activeTab === tab ? '2px solid #f59e0b' : '2px solid transparent',
                   background: 'transparent', border: 'none', borderRadius: 0,
-                  padding: '10px 14px', cursor: 'pointer', transition: 'all 0.15s',
+                  padding: isMobile ? '10px 10px' : '10px 14px',
+                  cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap',
                 }}
               >
                 {tab}
@@ -274,10 +277,12 @@ export default function AgentPage({ onLeadSaved, user, onGoToSettings }) {
         </div>
       </div>
 
-      {/* Right panel */}
-      <div style={{ width: 240, borderLeft: '1px solid #27272a', overflowY: 'auto', flexShrink: 0 }}>
-        <RightPanel profile={profile} />
-      </div>
+      {/* Right panel — hidden on mobile */}
+      {!isMobile && (
+        <div style={{ width: 240, borderLeft: '1px solid #27272a', overflowY: 'auto', flexShrink: 0 }}>
+          <RightPanel profile={profile} />
+        </div>
+      )}
     </div>
   );
 }

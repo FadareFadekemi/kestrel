@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Save, CheckCircle, AlertCircle, User, Building, FileText, Zap, Globe } from 'lucide-react';
 import { authFetch } from '../services/authApi';
+import useIsMobile from '../hooks/useIsMobile';
 
 export default function SettingsPage({ user, onUserUpdated }) {
+  const isMobile = useIsMobile();
   const [form, setForm] = useState({
     name:               user?.name               || '',
     sender_title:       user?.senderTitle         || '',
@@ -43,7 +45,7 @@ export default function SettingsPage({ user, onUserUpdated }) {
   const isComplete = form.company_name.trim() && form.product_description.trim();
 
   return (
-    <div style={{ padding: '28px 32px', overflowY: 'auto', height: '100%', maxWidth: 720 }}>
+    <div style={{ padding: isMobile ? '20px 16px' : '28px 32px', overflowY: 'auto', height: '100%', maxWidth: 720 }}>
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#fafafa', margin: 0 }}>Settings</h1>
         <p style={{ fontSize: 13, color: '#52525b', marginTop: 4 }}>
@@ -69,7 +71,7 @@ export default function SettingsPage({ user, onUserUpdated }) {
 
       <form onSubmit={handleSave}>
         <Section title="Your Identity" icon={<User size={14} color="#f59e0b" />}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
             <Field label="Your Name" placeholder="e.g. Sarah Johnson"
               value={form.name} onChange={v => set('name', v)} />
             <Field label="Your Title" placeholder="e.g. Head of Sales"
@@ -78,7 +80,7 @@ export default function SettingsPage({ user, onUserUpdated }) {
         </Section>
 
         <Section title="Your Company" icon={<Building size={14} color="#f59e0b" />}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14, marginBottom: 14 }}>
             <Field label="Company Name *" placeholder="e.g. Acme Inc."
               value={form.company_name} onChange={v => set('company_name', v)} required />
             <Field label="Website" placeholder="e.g. acme.com"

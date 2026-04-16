@@ -1,13 +1,15 @@
 import { useState, useMemo } from 'react';
-import { Search, ChevronRight, Mail, ExternalLink, Copy, Check, X, Send, Loader } from 'lucide-react';
+import { Search, ChevronRight, Mail, ExternalLink, Copy, Check, X, Send, Loader, ArrowLeft } from 'lucide-react';
 import StatusBadge from '../components/UI/StatusBadge';
 import ScoreRing from '../components/UI/ScoreRing';
 import EmptyState from '../components/UI/EmptyState';
 import { sendEmail } from '../services/api';
+import useIsMobile from '../hooks/useIsMobile';
 
 const STATUSES = ['All', 'Not Contacted', 'Contacted', 'Replied', 'Converted'];
 
 export default function LeadsPage({ leads, onUpdateLead, setActivePage }) {
+  const isMobile = useIsMobile();
   const [search,         setSearch]         = useState('');
   const [statusFilter,   setStatusFilter]   = useState('All');
   const [sortBy,         setSortBy]         = useState('score');
@@ -69,12 +71,16 @@ export default function LeadsPage({ leads, onUpdateLead, setActivePage }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // On mobile: show only list pane OR only detail pane
+  const showList   = !isMobile || !selectedLead;
+  const showDetail = !isMobile || !!selectedLead;
+
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
       {/* List pane */}
-      <div style={{ width: selectedLead ? 380 : '100%', borderRight: selectedLead ? '1px solid #27272a' : 'none', display: 'flex', flexDirection: 'column', flexShrink: 0, transition: 'width 0.2s' }}>
+      {showList && <div style={{ width: (!isMobile && selectedLead) ? 380 : '100%', borderRight: (!isMobile && selectedLead) ? '1px solid #27272a' : 'none', display: 'flex', flexDirection: 'column', flexShrink: 0, transition: 'width 0.2s' }}>
         {/* Toolbar */}
-        <div style={{ padding: '20px 20px 12px', borderBottom: '1px solid #27272a', flexShrink: 0 }}>
+        <div style={{ padding: isMobile ? '14px 14px 10px' : '20px 20px 12px', borderBottom: '1px solid #27272a', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fafafa', margin: 0 }}>Leads <span style={{ fontSize: 14, fontWeight: 400, color: '#52525b' }}>({filtered.length})</span></h2>
           </div>
@@ -94,7 +100,7 @@ export default function LeadsPage({ leads, onUpdateLead, setActivePage }) {
             </select>
           </div>
           {/* Status filters */}
-          <div style={{ display: 'flex', gap: 4, marginTop: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 4, marginTop: 10, flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 2 }}>
             {STATUSES.map(s => (
               <button key={s} onClick={() => setStatusFilter(s)} style={{
                 fontSize: 11, padding: '3px 10px', borderRadius: 20,
@@ -142,20 +148,25 @@ export default function LeadsPage({ leads, onUpdateLead, setActivePage }) {
             ))
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Detail pane */}
-      {selectedLead && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', animation: 'fadeInUp 0.2s ease' }}>
+      {showDetail && selectedLead && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px' : '20px 24px', animation: 'fadeInUp 0.2s ease' }}>
           {/* Header */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-            <div>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: '#fafafa', margin: 0 }}>{selectedLead.company}</h2>
+                {isMobile && (
+                  <button onClick={() => setSelectedLead(null)} style={{ background: 'none', border: 'none', color: '#71717a', cursor: 'pointer', display: 'flex', padding: 0, flexShrink: 0 }}>
+                    <ArrowLeft size={18} />
+                  </button>
+                )}
+                <h2 style={{ fontSize: isMobile ? 17 : 20, fontWeight: 700, color: '#fafafa', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedLead.company}</h2>
                 {selectedLead.website && (
                   <a href={selectedLead.website.startsWith('http') ? selectedLead.website : `https://${selectedLead.website}`}
                     target="_blank" rel="noopener noreferrer"
-                    style={{ color: '#52525b', display: 'flex' }}>
+                    style={{ color: '#52525b', display: 'flex', flexShrink: 0 }}>
                     <ExternalLink size={14} />
                   </a>
                 )}
@@ -167,7 +178,7 @@ export default function LeadsPage({ leads, onUpdateLead, setActivePage }) {
                   ))}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, marginLeft: 8 }}>
               <select
                 value={selectedLead.status}
                 onChange={e => handleStatusChange(selectedLead, e.target.value)}
@@ -175,14 +186,16 @@ export default function LeadsPage({ leads, onUpdateLead, setActivePage }) {
               >
                 {STATUSES.slice(1).map(s => <option key={s}>{s}</option>)}
               </select>
-              <button onClick={() => setSelectedLead(null)} style={{ background: '#27272a', border: '1px solid #3f3f46', borderRadius: 7, padding: '6px 8px', cursor: 'pointer', color: '#71717a', display: 'flex' }}>
-                <X size={14} />
-              </button>
+              {!isMobile && (
+                <button onClick={() => setSelectedLead(null)} style={{ background: '#27272a', border: '1px solid #3f3f46', borderRadius: 7, padding: '6px 8px', cursor: 'pointer', color: '#71717a', display: 'flex' }}>
+                  <X size={14} />
+                </button>
+              )}
             </div>
           </div>
 
           {/* Score row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: 10, marginBottom: 20 }}>
             {[
               { label: 'Overall',  val: selectedLead.score,           color: '#f59e0b' },
               { label: 'Tech Fit', val: selectedLead.techFit,         color: '#a78bfa' },

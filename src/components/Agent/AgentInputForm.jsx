@@ -5,24 +5,11 @@ export default function AgentInputForm({ onSubmit, isRunning }) {
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
 
-  const checkKeys = () => {
-    const missing = [];
-    if (!import.meta.env.VITE_TAVILY_API_KEY) missing.push('VITE_TAVILY_API_KEY');
-    if (!import.meta.env.VITE_EXA_API_KEY) missing.push('VITE_EXA_API_KEY');
-    if (!import.meta.env.VITE_OPENAI_API_KEY) missing.push('VITE_OPENAI_API_KEY');
-    return missing;
-  };
-
   const handleSubmit = (e) => {
     e.preventDefault();
     setError('');
     const val = input.trim();
     if (!val) { setError('Please enter a company name or URL.'); return; }
-    const missing = checkKeys();
-    if (missing.length > 0) {
-      setError(`Missing API keys: ${missing.join(', ')}. Add them to your .env file.`);
-      return;
-    }
     onSubmit(val);
   };
 

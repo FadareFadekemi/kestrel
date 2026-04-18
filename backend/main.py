@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -8,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, field_validator
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -22,13 +24,27 @@ from auth import (
     validate_email, validate_password,
     hash_password, verify_password,
     create_access_token, get_current_user,
+    SECRET_KEY,
 )
+
+log = logging.getLogger("kestrel")
 
 # ── Rate limiter ──────────────────────────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app):
+    # ── Startup security checks ───────────────────────────────────────────────
+    weak_defaults = {
+        "CHANGE_ME_IN_PRODUCTION_USE_A_LONG_RANDOM_STRING",
+        "changeme", "secret", "your-secret-key",
+    }
+    if SECRET_KEY in weak_defaults or len(SECRET_KEY) < 32:
+        log.warning(
+            "⚠️  SECURITY: JWT_SECRET_KEY is not set or too weak. "
+            "Set a strong random secret (≥32 chars) via the JWT_SECRET_KEY env variable."
+        )
+
     try:
         models.Base.metadata.create_all(bind=engine)
         print("Database tables ready.")
@@ -39,6 +55,29 @@ async def lifespan(app):
 app = FastAPI(title="Kestrel API", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── Global error handler — prevents stack traces leaking to clients ──────────
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    log.error("Unhandled exception on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal error occurred. Please try again later."},
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Invalid request data.", "errors": exc.errors()},
+    )
+
+# ── TrustedHostMiddleware (applied only when ALLOWED_HOSTS env is set) ────────
+_allowed_hosts_env = os.getenv("ALLOWED_HOSTS", "").strip()
+if _allowed_hosts_env:
+    _allowed_hosts = [h.strip() for h in _allowed_hosts_env.split(",") if h.strip()]
+    if _allowed_hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 FRONTEND_URL = os.getenv("FRONTEND_URL", "")
@@ -52,27 +91,46 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=[],
+    max_age=600,
 )
 
 # ── Security headers middleware ───────────────────────────────────────────────
+_IS_PROD = os.getenv("ENVIRONMENT", "development").lower() == "production"
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
-    response.headers["X-Content-Type-Options"]    = "nosniff"
-    response.headers["X-Frame-Options"]           = "DENY"
-    response.headers["X-XSS-Protection"]          = "1; mode=block"
-    response.headers["Referrer-Policy"]           = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"]        = "geolocation=(), microphone=(), camera=()"
-    response.headers["Cache-Control"]             = "no-store"
+    h = response.headers
+    h["X-Content-Type-Options"]              = "nosniff"
+    h["X-Frame-Options"]                     = "DENY"
+    h["X-XSS-Protection"]                   = "1; mode=block"
+    h["X-Permitted-Cross-Domain-Policies"]   = "none"
+    h["Referrer-Policy"]                     = "strict-origin-when-cross-origin"
+    h["Permissions-Policy"]                  = (
+        "geolocation=(), microphone=(), camera=(), payment=(), "
+        "usb=(), bluetooth=(), interest-cohort=()"
+    )
+    h["Cache-Control"]                       = "no-store, no-cache, must-revalidate"
+    h["Content-Security-Policy"]             = (
+        "default-src 'none'; frame-ancestors 'none'; "
+        "base-uri 'none'; form-action 'none'; object-src 'none';"
+    )
+    if _IS_PROD:
+        h["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     return response
 
 # ── Request size limit (1 MB) ─────────────────────────────────────────────────
 @app.middleware("http")
 async def limit_request_size(request: Request, call_next):
-    max_size = 1_000_000  # 1 MB
+    max_size = 1_000_000
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > max_size:
-        return JSONResponse(status_code=413, content={"detail": "Request too large"})
+    if content_length:
+        try:
+            if int(content_length) > max_size:
+                return JSONResponse(status_code=413, content={"detail": "Request too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
     return await call_next(request)
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -161,6 +219,84 @@ class ABRequest(BaseModel):
 
 class LeadCreate(BaseModel):
     lead: dict
+
+# ── Job seeker Pydantic models ────────────────────────────────────────────────
+
+class JSResearchRequest(BaseModel):
+    company:     str
+    target_role: str
+
+    @field_validator("company", "target_role")
+    @classmethod
+    def not_empty(cls, v):
+        v = v.strip()
+        if not v or len(v) > 200:
+            raise ValueError("Must be 1–200 characters")
+        return v
+
+class JSProfilingRequest(BaseModel):
+    research:    dict
+    target_role: str
+
+class JSEmailRequest(BaseModel):
+    profile:   dict
+    research:  dict
+    candidate: dict
+    tone:      str = "Professional"
+
+    @field_validator("tone")
+    @classmethod
+    def valid_tone(cls, v):
+        if v not in ("Enthusiastic", "Professional", "Concise"):
+            raise ValueError("Invalid tone")
+        return v
+
+class JSFollowupRequest(BaseModel):
+    company:          str
+    role:             str
+    days:             int
+    original_subject: str
+
+class JSCVAnalysisRequest(BaseModel):
+    cv_text: str
+
+    @field_validator("cv_text")
+    @classmethod
+    def not_empty(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError("CV text is required")
+        return v[:8000]
+
+class JSImproveSummaryRequest(BaseModel):
+    summary:     str
+    target_role: str
+
+class JSImproveBulletRequest(BaseModel):
+    bullet: str
+    role:   str
+
+class JSSuggestSkillsRequest(BaseModel):
+    target_role:    str
+    current_skills: list = []
+
+class JSJDMatchRequest(BaseModel):
+    cv_text: str
+    jd_text: str
+
+class JSMatchingRequest(BaseModel):
+    profile: dict
+
+class JSScamRequest(BaseModel):
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def not_empty(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError("Text is required")
+        return v[:4000]
 
 class LeadUpdate(BaseModel):
     status:       Optional[str] = None
@@ -382,6 +518,156 @@ async def send_email_endpoint(
     if req.lead_id:
         crud.update_lead(db, req.lead_id, {"status": "Contacted"})
     return {"ok": True, "message": f"Email sent to {req.to_email}"}
+
+# ── Job seeker routes (protected) ────────────────────────────────────────────
+
+@app.post("/api/js/research")
+@limiter.limit("20/minute")
+async def js_research(
+    request: Request,
+    req: JSResearchRequest,
+    _: models.User = Depends(get_current_user),
+):
+    async def stream():
+        from services.js_outreach import run_js_research
+        async for chunk in run_js_research(req.company, req.target_role):
+            yield sse(chunk["event"], chunk["data"])
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+@app.post("/api/js/profile")
+@limiter.limit("20/minute")
+async def js_profile(
+    request: Request,
+    req: JSProfilingRequest,
+    _: models.User = Depends(get_current_user),
+):
+    async def stream():
+        from services.js_outreach import run_js_profiling
+        async for chunk in run_js_profiling(req.research, req.target_role):
+            yield sse(chunk["event"], chunk["data"])
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+@app.post("/api/js/email")
+@limiter.limit("20/minute")
+async def js_email(
+    request: Request,
+    req: JSEmailRequest,
+    _: models.User = Depends(get_current_user),
+):
+    async def stream():
+        from services.js_outreach import run_js_email
+        async for chunk in run_js_email(req.profile, req.research, req.candidate, req.tone):
+            yield sse(chunk["event"], chunk["data"])
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+@app.post("/api/js/followup")
+@limiter.limit("20/minute")
+async def js_followup(
+    request: Request,
+    req: JSFollowupRequest,
+    _: models.User = Depends(get_current_user),
+):
+    from services.js_outreach import run_js_followup
+    result = await run_js_followup(req.company, req.role, req.days, req.original_subject)
+    return result
+
+@app.post("/api/js/cv/analyse")
+@limiter.limit("15/minute")
+async def js_cv_analyse(
+    request: Request,
+    req: JSCVAnalysisRequest,
+    _: models.User = Depends(get_current_user),
+):
+    async def stream():
+        from services.js_cv import run_cv_analysis
+        async for chunk in run_cv_analysis(req.cv_text):
+            yield sse(chunk["event"], chunk["data"])
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+@app.post("/api/js/cv/improve-summary")
+@limiter.limit("20/minute")
+async def js_improve_summary(
+    request: Request,
+    req: JSImproveSummaryRequest,
+    _: models.User = Depends(get_current_user),
+):
+    async def stream():
+        from services.js_cv import run_improve_summary
+        async for chunk in run_improve_summary(req.summary, req.target_role):
+            yield sse(chunk["event"], chunk["data"])
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+@app.post("/api/js/cv/improve-bullet")
+@limiter.limit("30/minute")
+async def js_improve_bullet(
+    request: Request,
+    req: JSImproveBulletRequest,
+    _: models.User = Depends(get_current_user),
+):
+    async def stream():
+        from services.js_cv import run_improve_bullet
+        async for chunk in run_improve_bullet(req.bullet, req.role):
+            yield sse(chunk["event"], chunk["data"])
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+@app.post("/api/js/cv/suggest-skills")
+@limiter.limit("20/minute")
+async def js_suggest_skills(
+    request: Request,
+    req: JSSuggestSkillsRequest,
+    _: models.User = Depends(get_current_user),
+):
+    async def stream():
+        from services.js_cv import run_suggest_skills
+        async for chunk in run_suggest_skills(req.target_role, req.current_skills):
+            yield sse(chunk["event"], chunk["data"])
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+@app.post("/api/js/cv/jd-match")
+@limiter.limit("15/minute")
+async def js_jd_match(
+    request: Request,
+    req: JSJDMatchRequest,
+    _: models.User = Depends(get_current_user),
+):
+    async def stream():
+        from services.js_cv import run_jd_match
+        async for chunk in run_jd_match(req.cv_text, req.jd_text):
+            yield sse(chunk["event"], chunk["data"])
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+@app.post("/api/js/matches")
+@limiter.limit("10/minute")
+async def js_matches(
+    request: Request,
+    req: JSMatchingRequest,
+    _: models.User = Depends(get_current_user),
+):
+    async def stream():
+        from services.js_matching import run_job_matching
+        async for chunk in run_job_matching(req.profile):
+            yield sse(chunk["event"], chunk["data"])
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+@app.post("/api/js/scam-detect")
+@limiter.limit("20/minute")
+async def js_scam_detect(
+    request: Request,
+    req: JSScamRequest,
+    _: models.User = Depends(get_current_user),
+):
+    from services.js_matching import run_scam_detection
+    result = await run_scam_detection(req.text)
+    return result
+
+# ── Public tools (no auth required) ─────────────────────────────────────────
+
+@app.post("/api/public/scam-detect")
+@limiter.limit("5/minute")
+async def public_scam_detect(request: Request, req: JSScamRequest):
+    from services.js_matching import run_scam_detection
+    result = await run_scam_detection(req.text)
+    return result
 
 # ── Health (public) ───────────────────────────────────────────────────────────
 

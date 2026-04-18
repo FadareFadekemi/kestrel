@@ -8,22 +8,54 @@ import SequencesPage from './pages/SequencesPage';
 import BatchPage from './pages/BatchPage';
 import AuthPage from './pages/AuthPage';
 import SettingsPage from './pages/SettingsPage';
+import ModeSelectPage from './pages/ModeSelectPage';
+import JobSeekerSetupPage from './pages/JobSeekerSetupPage';
 import { isLoggedIn, logout, fetchMe } from './services/authApi';
 import { fetchLeads, saveLead, updateLead as updateLeadApi } from './services/leadsApi';
 import './index.css';
 
+const USER_TYPE_KEY = 'kestrel_user_type';
+const VALID_TYPES   = ['company', 'jobseeker'];
+
+function getStoredUserType() {
+  try {
+    const v = localStorage.getItem(USER_TYPE_KEY);
+    return VALID_TYPES.includes(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeUserType(type) {
+  if (!VALID_TYPES.includes(type)) return;
+  try { localStorage.setItem(USER_TYPE_KEY, type); } catch { /* private mode */ }
+}
+
+function clearStoredUserType() {
+  try { localStorage.removeItem(USER_TYPE_KEY); } catch { /* private mode */ }
+}
+
 export default function App() {
-  const [activePage, setActivePage] = useState('Dashboard');
-  const [leads,      setLeads]      = useState([]);
-  const [user,       setUser]       = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);  // prevents flash
+  const [activePage,   setActivePage]   = useState('Dashboard');
+  const [leads,        setLeads]        = useState([]);
+  const [user,         setUser]         = useState(null);
+  const [authChecked,  setAuthChecked]  = useState(false);
+  const [userType,     setUserType]     = useState(null);   // 'company' | 'jobseeker'
+  const [appStep,      setAppStep]      = useState('app'); // 'mode-select' | 'jobseeker-setup' | 'app'
 
   // ── Restore session on mount ────────────────────────────────────────────────
   useEffect(() => {
     if (!isLoggedIn()) { setAuthChecked(true); return; }
     fetchMe()
       .then(u => {
-        if (u) { setUser(u); return loadLeads(); }
+        if (u) {
+          setUser(u);
+          // Existing session — use stored type; default to 'company' for pre-existing accounts
+          const stored = getStoredUserType() || 'company';
+          storeUserType(stored);
+          setUserType(stored);
+          return loadLeads();
+        }
       })
       .catch(() => {})
       .finally(() => setAuthChecked(true));
@@ -33,20 +65,51 @@ export default function App() {
     try {
       const data = await fetchLeads();
       setLeads(data);
-    } catch { /* backend may not be running yet */ }
+    } catch { /* backend may not be running */ }
   }
 
   // ── Auth handlers ───────────────────────────────────────────────────────────
-  const handleAuth = useCallback((u) => {
+  const handleAuth = useCallback((u, isNewUser) => {
     setUser(u);
+    const stored = getStoredUserType();
+    if (isNewUser && !stored) {
+      // New signup with no stored preference → show mode selection
+      setAppStep('mode-select');
+    } else {
+      // Login, or returning user — honour stored type or default to company
+      const type = stored || 'company';
+      storeUserType(type);
+      setUserType(type);
+      setAppStep('app');
+      loadLeads();
+    }
+  }, []);
+
+  const handleModeSelect = useCallback((type) => {
+    if (!VALID_TYPES.includes(type)) return;
+    storeUserType(type);
+    setUserType(type);
+    if (type === 'jobseeker') {
+      setAppStep('jobseeker-setup');
+    } else {
+      setAppStep('app');
+      loadLeads();
+    }
+  }, []);
+
+  const handleJobSeekerSetupComplete = useCallback(() => {
+    setAppStep('app');
     loadLeads();
   }, []);
 
   const handleLogout = useCallback(() => {
     logout();
+    clearStoredUserType();
     setUser(null);
+    setUserType(null);
     setLeads([]);
     setActivePage('Dashboard');
+    setAppStep('app');
   }, []);
 
   // ── Lead persistence ────────────────────────────────────────────────────────
@@ -66,7 +129,7 @@ export default function App() {
   }, []);
 
   const handleUpdateLead = useCallback(async (updated) => {
-    setLeads(prev => prev.map(l => l.id === updated.id ? updated : l)); // optimistic
+    setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
     try {
       const saved = await updateLeadApi(updated.id, { status: updated.status });
       setLeads(prev => prev.map(l => l.id === saved.id ? saved : l));
@@ -75,9 +138,11 @@ export default function App() {
     }
   }, []);
 
-  // ── Render guard ────────────────────────────────────────────────────────────
-  if (!authChecked) return null;  // brief blank while checking session
+  // ── Render guards ────────────────────────────────────────────────────────────
+  if (!authChecked) return null;
   if (!user) return <AuthPage onAuth={handleAuth} />;
+  if (appStep === 'mode-select') return <ModeSelectPage onSelect={handleModeSelect} />;
+  if (appStep === 'jobseeker-setup') return <JobSeekerSetupPage user={user} onComplete={handleJobSeekerSetupComplete} />;
 
   const renderPage = () => {
     switch (activePage) {
@@ -93,7 +158,14 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#09090b', display: 'flex', flexDirection: 'column' }}>
-      <Navbar activePage={activePage} setActivePage={setActivePage} user={user} onLogout={handleLogout} onSettings={() => setActivePage('Settings')} />
+      <Navbar
+        activePage={activePage}
+        setActivePage={setActivePage}
+        user={user}
+        userType={userType}
+        onLogout={handleLogout}
+        onSettings={() => setActivePage('Settings')}
+      />
 
       {activePage !== 'Agent' && (
         <button

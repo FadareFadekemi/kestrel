@@ -16,10 +16,11 @@ export default function AuthPage({ onAuth }) {
     setError('');
     setLoading(true);
     try {
-      const user = mode === 'login'
-        ? await login(email, password)
-        : await signup(email, password, name);
-      onAuth(user);
+      const isNewUser = mode === 'signup';
+      const user = isNewUser
+        ? await signup(email, password, name)
+        : await login(email, password);
+      onAuth(user, isNewUser);
     } catch (err) {
       setError(err.message || 'Something went wrong');
     } finally {
